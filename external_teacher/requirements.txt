@@ -1,0 +1,16 @@
+# External-teacher environment recorded on the source machine (Python 3.11).
+torch==2.9.0
+transformers==4.57.6
+trl==1.1.0
+vllm==0.12.0
+accelerate==1.13.0
+datasets==4.8.4
+peft==0.18.1
+deepspeed==0.16.9
+wandb==0.25.0
+pandas
+requests
+math-verify==0.8.0
+latex2sympy2-extended
+pylatexenc
+sentencepiece
