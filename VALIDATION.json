@@ -1,0 +1,27 @@
+{
+  "checked_utc": "2026-10-21T23:20:05.288454+00:00",
+  "scope": "Source release validation only; no training or benchmark generation.",
+  "checks": {
+    "python_syntax": true,
+    "shell_syntax": true,
+    "documentation_links": true,
+    "credential_literal_scan": "no findings",
+    "launcher_capture_count": 14,
+    "self_launchers_parsed_in_existing_opsd_environment": 12,
+    "external_training_configs_constructed_in_existing_sft_environment": 2,
+    "cpu_config_validation_override": "use_cpu=True, bf16=False only during type/config validation; public BF16 settings retained",
+    "external_loss_values_and_gradients": "bitwise identical to original for full vocabulary and top3/tail CPU tensors",
+    "opsd_loss_values_and_gradients": "bitwise identical to original for full vocabulary and top3/tail CPU tensors",
+    "external_group_gate": "all-zero group gated; wrong responses in mixed group ungated; groups cross buffer slices",
+    "unit_tests": 2,
+    "qa_parser_source_comparison_cases": 22,
+    "biology_train_rows_sha256": "19ae9ff827f1ec58dc6db51288d8057a316482d65cc5cbcd3df3a51434f12134",
+    "biology_dev_rows_sha256": "016361b46c805b0e3eb83faa3cd624e456d0183d70caff5ab7114620f877d1f0",
+    "whitespace_cleanup_preserves_python_ast": true
+  },
+  "limitations": [
+    "No clean-environment dependency installation was performed; requirements reflect recorded source environments.",
+    "No GPU training, benchmark generation, TACO download/filter regeneration, or new scientific result.",
+    "Paper-default launchers are author-requested reconstructed settings; actual recorded settings remain separate."
+  ]
+}
