@@ -1,0 +1,14 @@
+# OPSD/GOLD environment recorded on the source machine (Python 3.11).
+torch==2.8.0
+transformers==4.57.1
+trl==0.26.0
+vllm==0.11.0
+accelerate==1.11.0
+datasets==3.6.0
+peft==0.17.1
+deepspeed==0.18.2
+wandb==0.22.3
+math-verify==0.8.0
+latex2sympy2-extended
+pylatexenc
+sentencepiece
