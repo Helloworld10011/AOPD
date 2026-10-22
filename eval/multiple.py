@@ -1,7 +1,5 @@
 # Generate MultiPL-E completions with the original language stop tokens; scoring is a separate step.
 import argparse, json, os
-from datasets import load_dataset
-from vllm import LLM, SamplingParams
 
 def main():
     ap = argparse.ArgumentParser()
@@ -14,6 +12,13 @@ def main():
     ap.add_argument("--tp", type=int, default=1)
     ap.add_argument("--max_tokens", type=int, default=512)
     args = ap.parse_args()
+    if min(args.n, args.tp, args.max_tokens) < 1 or args.temperature < 0:
+        ap.error('n, tp, and max_tokens must be positive; temperature must be nonnegative.')
+    if args.n > 1 and args.temperature == 0:
+        ap.error('Use --temperature greater than zero when --n is greater than one.')
+
+    from datasets import load_dataset
+    from vllm import LLM, SamplingParams
 
     os.makedirs(args.out_dir, exist_ok=True)
 
