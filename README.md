@@ -43,8 +43,8 @@ There is one `AOPDTrainer` for each setting:
 
 | Setting | Loss implementation | Training entry point |
 | :--- | :--- | :--- |
-| External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py) | [`external_teacher/aopd_train.py`](training/external_teacher/aopd_train.py) |
-| Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py) | [`self_distillation/aopd_train.py`](training/self_distillation/aopd_train.py) |
+| External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py)
+| Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py)
 
 Both trainers compute group-relative advantages and apply the clipped AOPD loss. The self-distillation `AOPDTrainer` inherits from `OPSDTrainer` in [`opsd_base.py`](training/self_distillation/opsd_base.py), which inherits from TRL’s `SFTTrainer`. Task prompts and rewards are in [`tasks.py`](training/self_distillation/tasks.py).
 
@@ -54,8 +54,7 @@ Both trainers compute group-relative advantages and apply the clipped AOPD loss.
 
 ## Training
 
-All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model; optional training arguments follow it. Set `NUM_GPUS` for another GPU count; this changes the effective batch size.
-
+All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model, and optional training arguments follow it.
 | Script | Task / data | Steps | Training tokens |
 | :--- | :--- | ---: | ---: |
 | `run_external_math.sh` | OpenThoughts math | 450 | 8192 |
@@ -81,14 +80,14 @@ Self-coding executes Python in Docker. Pull its pinned runtime before training:
 docker pull ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc
 ```
 
-**External teacher:** Qwen3-1.7B is the student; the math teacher is Qwen3-4B-Instruct-2507 and the coding teacher is Qwen3-8B.
+**External teacher:** Qwen3-1.7B is the student on both math and coding. We use Qwen3-4B-Instruct-2507 as the teacher for math and Qwen3-8B for coding.
 
 ```bash
 bash scripts/run_external_math.sh Qwen/Qwen3-1.7B
 bash scripts/run_external_code.sh Qwen/Qwen3-1.7B
 ```
 
-**Self-distillation:** the frozen base model sees a reference solution; the student sees only the problem. Math uses Qwen3-1.7B/8B; the other tasks use Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507.
+**Self-distillation:** Math training uses Qwen3-1.7B/8B. We use tow instruct models (Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507) for the other tasks.
 
 ```bash
 bash scripts/run_self_math.sh Qwen/Qwen3-8B
@@ -97,7 +96,7 @@ bash scripts/run_self_biology.sh Qwen/Qwen3-4B-Instruct-2507
 bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
 ```
 
-**Settings:** paper defaults use non-thinking prompts, batch 32 on eight GPUs, four responses per group, temperature 0.8, top-p 1, and no sampling top-k pruning. Learning rate is `2e-5`, except Qwen3 biology uses `1e-5`. Override directly, e.g. append `--learning_rate 1e-5 --output_dir outputs/my_run`.
+**Settings:** paper defaults use non-thinking mode, `batch-size = 32`, four responses per group, `temperature = 0.8, top-p = 1, top_k = -1` for AOPD. Learning rate is `2e-5`, except Qwen3 on biology uses `1e-5`. Override directly, e.g. append `--learning_rate 1e-5 --output_dir outputs/my_run`.
 
 ## Evaluation
 
