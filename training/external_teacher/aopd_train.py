@@ -23,6 +23,7 @@ def parse_args(argv=None):
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--accumulation', type=int, default=4)
+    parser.add_argument('--top_k_loss', type=int, default=0, help='Teacher top-k for the loss; 0 uses the full vocabulary.')
     parser.add_argument('--mu', type=float, default=None)
     parser.add_argument('--report_to', default='none')
     args = parser.parse_args(argv)
@@ -33,6 +34,8 @@ def parse_args(argv=None):
         parser.error('Steps, batch size, and accumulation must be positive.')
     if args.batch_size * args.accumulation % 4:
         parser.error('batch_size * accumulation must be divisible by four for complete local reward groups.')
+    if args.top_k_loss < 0:
+        parser.error('--top_k_loss must be zero (full vocabulary) or a positive integer.')
     if not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not math.isfinite(args.mu) or args.mu < 0:
         parser.error('Learning rate must be positive and mu must be nonnegative; both must be finite.')
     return args
@@ -119,7 +122,7 @@ def build_config(args, local_rank):
         bf16=True, gradient_checkpointing=True, gradient_checkpointing_kwargs={'use_reentrant':False},
         disable_dropout=True, per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.accumulation, num_generations=4,
-        lmbda=1., beta=0., loss_top_k=64, loss_add_tail=True,
+        lmbda=1., beta=0., loss_top_k=args.top_k_loss, loss_add_tail=True,
         max_completion_length=cap, max_length=9500 if args.task=='math' else 6144,
         temperature=.8, top_p=1., top_k=-1, use_vllm=True, vllm_mode='colocate',
         vllm_gpu_memory_utilization=.2, logging_steps=10, logging_first_step=True,
