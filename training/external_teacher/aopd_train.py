@@ -1,17 +1,12 @@
 # Train external-teacher AOPD on math or coding with the same trainer.
 import argparse
+import math
 import json
 import os
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import torch
-from datasets import load_dataset, load_from_disk
-from peft import LoraConfig
-from transformers import AutoTokenizer
-from trl.experimental.distillation import DistillationConfig
-from .trainer import AOPDTrainer
 
 MATH_INSTRUCTION = 'Please reason step by step, and put your final answer within \\boxed{}.'
 CODE_INSTRUCTION = 'Write Python code to solve the problem. Present the code in a Python code block at the end. Think first, then write the Python code in a ```python code block.'
@@ -29,11 +24,17 @@ def parse_args(argv=None):
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--accumulation', type=int, default=4)
     parser.add_argument('--mu', type=float, default=None)
-    parser.add_argument('--report_to', default='wandb')
+    parser.add_argument('--report_to', default='none')
     args = parser.parse_args(argv)
-    args.max_steps = args.max_steps or (450 if args.task == 'math' else 350)
+    args.max_steps = (450 if args.task == 'math' else 350) if args.max_steps is None else args.max_steps
     args.mu = (.08 if args.task == 'math' else 0.) if args.mu is None else args.mu
     args.output_dir = args.output_dir or f'outputs/aopd_external_{args.task}'
+    if any(getattr(args, name) <= 0 for name in ('max_steps', 'batch_size', 'accumulation')):
+        parser.error('Steps, batch size, and accumulation must be positive.')
+    if args.batch_size * args.accumulation % 4:
+        parser.error('batch_size * accumulation must be divisible by four for complete local reward groups.')
+    if not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not math.isfinite(args.mu) or args.mu < 0:
+        parser.error('Learning rate must be positive and mu must be nonnegative; both must be finite.')
     return args
 
 
@@ -49,11 +50,14 @@ def render_example(example, task):
 
 
 def load_training_data(args, tokenizer):
+    from datasets import load_dataset, load_from_disk
     if args.task == 'math':
         raw = load_dataset('siyanzhao/Openthoughts_math_30k_opsd', split='train').shuffle(seed=args.seed)
         raw = raw.select(range(len(raw)//2))
         train = raw.select(range(256,len(raw)))
     else:
+        if not Path(args.data_dir).is_dir():
+            raise FileNotFoundError('Prepare external coding data first: python -m data.prepare --task external_code')
         raw = load_from_disk(args.data_dir)
         def fits(example):
             text = tokenizer.apply_chat_template(render_example(example,'code')['messages'], tokenize=False,
@@ -80,7 +84,8 @@ def get_reward(task):
                     scores.append(0.)
             return scores
         return reward
-    from .code_reward import compute_score
+    from .code_reward import compute_score, check_sandbox
+    check_sandbox()
     pool = ThreadPoolExecutor(max_workers=4)
     semaphore = threading.Semaphore(20)
     def score(text, tests):
@@ -89,14 +94,17 @@ def get_reward(task):
         tests = json.loads(tests) if isinstance(tests,str) else tests
         selected = json.dumps({key:tests[key][:5] for key in ('inputs','outputs')})
         try:
-            result, _ = compute_score('http://127.0.0.1:8080/run_code', semaphore, 1024, text, selected, continuous=False, timeout=10)
+            result, metadata = compute_score('http://127.0.0.1:8080/run_code', semaphore, 1024, text, selected, continuous=False, timeout=10)
+            if any(item.get('api_request_error') for item in metadata):
+                raise RuntimeError('SandboxFusion failed while scoring a completion. Check the sandbox server.')
             return float(result)
-        except Exception:
-            return 0.
+        except (ValueError, KeyError, TypeError) as error:
+            raise ValueError('Invalid coding reward tests.') from error
     return lambda prompts,completions,answers:list(pool.map(score,completions,answers))
 
 
 def build_config(args, local_rank):
+    from trl.experimental.distillation import DistillationConfig
     cap = 8192 if args.task == 'math' else 4096
     deepspeed = {'train_batch_size':'auto', 'train_micro_batch_size_per_gpu':'auto',
                  'gradient_accumulation_steps':'auto', 'gradient_clipping':'auto',
@@ -125,6 +133,13 @@ def build_config(args, local_rank):
 
 def main():
     args = parse_args()
+    import torch
+    from peft import LoraConfig
+    from transformers import AutoTokenizer
+    from .aopd_trainer import AOPDTrainer
+
+    if not torch.cuda.is_available():
+        raise RuntimeError('AOPD training requires CUDA GPUs with BF16 support.')
     rank = int(os.environ.get('LOCAL_RANK',0))
     torch.cuda.set_device(rank)
     random.seed(args.seed); torch.manual_seed(args.seed)
@@ -143,6 +158,8 @@ def main():
         train_dataset=dataset,reward_func=get_reward(args.task),answer_lookup=lookup,mu=args.mu)
     trainer.train()
     trainer.save_model(args.output_dir)
+    if trainer.is_world_process_zero():
+        tokenizer.save_pretrained(args.output_dir)
 
 
 if __name__ == '__main__':
