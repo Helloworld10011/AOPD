@@ -1,6 +1,6 @@
 # AOPD: When to Follow the Teacher
 
-*Advantage-Based On-Policy Distillation for math, coding, medical QA, and biology.*
+*Advantage-Based On-Policy Distillation* provides a systemtic way to only use the useful parts of the teacher signal without any additional rollouts or inteventions.
 
 ## Abstract
 
