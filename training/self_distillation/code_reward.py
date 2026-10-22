@@ -19,13 +19,14 @@ POOL = ThreadPoolExecutor(max_workers=4)
 
 
 def check_docker():
-    """Check Docker access and the grading image before loading a training model."""
+    """Ensure the original grading image is available before loading a training model."""
     try:
         result = subprocess.run(['docker', 'image', 'inspect', IMAGE], capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise RuntimeError('Self-coding needs a running Docker daemon accessible to the current user.') from error
-    if result.returncode:
-        raise RuntimeError(f'Docker cannot access the coding image. Check daemon permissions and run: docker pull {IMAGE}')
+        if result.returncode:
+            print('Downloading the pinned coding runtime (first run only)...', flush=True)
+            subprocess.run(['docker', 'pull', IMAGE], check=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+        raise RuntimeError('Self-coding needs access to a running Docker daemon and its pinned grading image.') from error
 
 # Expected outputs never enter the container. Each candidate runs as a child
 # process, with fresh stdin and captured output, not in the grading interpreter.
