@@ -1,85 +1,119 @@
-# AOPD: Advantage-Based On-Policy Distillation
+# AOPD: When to Follow the Teacher
 
-**When to Follow the Teacher: Advantage-Based On-Policy Distillation**
+*Advantage-Based On-Policy Distillation for math, coding, medical QA, and biology.*
 
-AOPD learns from teacher suggestions according to whether they help the current student succeed. It uses the student's own sampled responses, their final rewards, and teacher probabilities along those responses. It needs no additional teacher rollouts or learned value model.
+## Abstract
 
-## Start here
+On-policy distillation trains a student on its own responses using teacher probabilities. AOPD weights this supervision by its usefulness to the current student, combining teacher/student importance ratios with advantages estimated from the final rewards of grouped student responses. It supports both an external teacher and a reference-conditioned self-teacher, without additional counterfactual rollouts or a learned value model.
 
-There are two implementations because their teachers and training dependencies differ:
+## Getting Started
 
-| Folder | Teacher | Tasks |
-| --- | --- | --- |
-| [`external_teacher/`](external_teacher/) | A separate frozen model | Math, coding |
-| [`self_distillation/`](self_distillation/) | The frozen base student given a reference solution | Math, medical QA, biology, coding |
-| [`evaluation/`](evaluation/) | Standalone benchmarks, graders, and diagnostic callbacks | Math, HumanEval+, MultiPL-E, QA, token interventions |
-| [`data/`](data/) | Dataset preparation | Biology, coding, QA evaluation inputs |
-
-Each source file starts with a short description. Each training folder has its own file guide and requirements. Run commands from the repository root.
-
-## Installation
-
-Use **Python 3.11** and a separate environment for each training folder. These versions follow the source environments; the external trainer uses TRL's experimental `DistillationTrainer`, while self-distillation uses the older GOLD/OPSD API.
+Use Python 3.11 and separate environments for the two settings:
 
 ```bash
 # External teacher
-python3.11 -m venv .venv-external
-source .venv-external/bin/activate
-pip install -r external_teacher/requirements.txt
+pip install -r training/external_teacher/requirements.txt
 pip install flash-attn==2.7.3 --no-build-isolation
 
-# Self-distillation: create this in a separate shell/environment
-python3.11 -m venv .venv-self
-source .venv-self/bin/activate
-pip install -r self_distillation/requirements.txt
+# Self-distillation — in a separate environment
+pip install -r training/self_distillation/requirements.txt
 pip install flash-attn==2.8.3 --no-build-isolation
 ```
 
-The launchers target eight GPUs with BF16, LoRA, and colocated vLLM. Match the PyTorch/CUDA build to your machine. Coding additionally needs Docker. Set `WANDB_MODE=disabled` to disable training uploads, or log in to your own W&B account.
+Run commands from the repository root. Launchers use eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). Set `WANDB_MODE=disabled` to disable training uploads.
 
 ## Training
 
-The short `run_*.sh` launchers use the **paper settings**: batch 32 on eight workers, non-thinking prompts, and the schedules below. They are the public starting points. The actual archived experiment commands are retained separately in [`self_distillation/recipes/`](self_distillation/recipes/); source settings and differences are explained in [REPRODUCIBILITY.md](REPRODUCIBILITY.md). These two sets are labelled because several source launchers differ from the paper.
+Each setting has one `train.py` and one `trainer.py`, in [`training/external_teacher/`](training/external_teacher/) and [`training/self_distillation/`](training/self_distillation/). Self-distillation also keeps the upstream OPSD base in `opsd.py` and task data/rewards in `tasks.py`.
 
-| Setting | Command | Student / teacher | Updates | Training tokens |
-| --- | --- | --- | ---: | ---: |
-| External math | `bash external_teacher/run_math.sh` | Qwen3-1.7B / Qwen3-4B-Instruct-2507 | 450 | 8192 |
-| External coding | `bash external_teacher/run_code.sh` | Qwen3-1.7B / Qwen3-8B | 350 | 4096 |
-| Self math | `bash self_distillation/run_math.sh` | Qwen3-1.7B; reference-conditioned self-teacher | 400 | 8192 |
-| Self medical | `bash self_distillation/run_medical.sh` | Qwen3-4B-Instruct-2507 | 300 | 2048 |
-| Self biology | `bash self_distillation/run_biology.sh` | Qwen3-4B-Instruct-2507 | 400 | 4096 |
-| Self coding | `bash self_distillation/run_code.sh` | Qwen3-4B-Instruct-2507 | 400 | 4096 |
+All launchers are in [`scripts/`](scripts/). The first argument selects the student model; optional training arguments follow it.
 
-Choose a different student with `MODEL=Qwen/Qwen3-8B bash self_distillation/run_math.sh` or `MODEL=Qwen/Qwen2.5-7B-Instruct bash self_distillation/run_medical.sh`. `OUTPUT_DIR` changes the output root. Remaining command-line options can be appended to a launcher. Task preparation and the original baseline files are documented inside each folder.
+| Script | Task / data | Steps | Training tokens |
+| :--- | :--- | ---: | ---: |
+| `run_external_math.sh` | OpenThoughts math | 450 | 8192 |
+| `run_external_code.sh` | Verified TACO | 350 | 4096 |
+| `run_self_math.sh` | OpenThoughts math | 400 | 8192 |
+| `run_self_medical.sh` | MedMCQA | 300 | 2048 |
+| `run_self_biology.sh` | SciKnowEval biology | 400 | 4096 |
+| `run_self_code.sh` | DeepCoder TACO | 400 | 4096 |
 
-### The loss, in a few steps
+**External teacher:** Qwen3-1.7B is the student; the math teacher is Qwen3-4B-Instruct-2507 and the coding teacher is Qwen3-8B.
 
-1. Sample a group of responses from the student and score their final answers.
-2. Give each response a leave-one-out advantage: its reward minus the mean reward of the other responses in its group.
-3. Combine the sampled teacher/student ratio with a dense teacher correction, clipping the ratio at `c = 4`. The original top-k/tail handling and residual term are preserved.
+```bash
+bash scripts/run_external_math.sh Qwen/Qwen3-1.7B
+bash scripts/run_external_code.sh Qwen/Qwen3-1.7B
+```
 
-**All-wrong groups.** The optional extra forward KL is applied only when **every response in a group has zero reward**. A wrong response in a mixed group does not receive this extra term. It supplies an imitation signal where all leave-one-out advantages would otherwise be zero. `mu=0` disables it; the external math source used `mu=0.08`, external coding used `0`, and the retained self-math all-wrong entry point defaults to `0`. Medical, biology, and self-coding recipes retain `mu=0`.
+**Self-distillation:** the frozen base model sees a reference solution; the student sees only the problem. Math uses Qwen3-1.7B/8B; the other tasks use Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507.
 
-**Why keep the residual?** Clipping caps teacher mass at `c` times the detached student probability. The leftover mass is the residual. The existing code gives that leftover mass a bounded, advantage-dependent correction: discourage it on positive-advantage responses and encourage it on negative-advantage responses. This is an implementation addition to the clipped objective described in the paper, and is retained unchanged. See the [exact expression](REPRODUCIBILITY.md#residual-term).
+```bash
+bash scripts/run_self_math.sh Qwen/Qwen3-8B
+bash scripts/run_self_medical.sh Qwen/Qwen2.5-7B-Instruct
+bash scripts/run_self_biology.sh Qwen/Qwen3-4B-Instruct-2507
+bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
+```
+
+**Data:** math and medical training load the released datasets directly. Prepare biology and coding data once:
+
+```bash
+python -m data.prepare --task biology
+python -m data.prepare --task code
+# External coding requires SandboxFusion running in a separate terminal:
+docker run --rm -p 127.0.0.1:8080:8080 volcengine/sandbox-fusion:server-20250609
+python -m data.prepare --task external_code
+```
+
+Self-coding executes Python in Docker. Pull its pinned runtime before training:
+
+```bash
+docker pull ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc
+```
+
+**Settings:** paper defaults use non-thinking prompts, batch 32 on eight GPUs, four responses per group, temperature 0.8, top-p 1, and no sampling top-k pruning. Learning rate is `2e-5`, except Qwen3 biology uses `1e-5`. Override directly, e.g. append `--learning_rate 1e-5 --output_dir outputs/my_run`.
+
+**All-wrong KL:** `--mu` adds forward KL only when every response in a group fails. It defaults to 0.08 for external math and zero otherwise; wrong responses in mixed groups do not receive this extra KL.
+
+**Residual:** clipping at `4 × student_probability` leaves some teacher mass unused. The original bounded sigmoid correction discourages that leftover mass on positive-advantage responses and encourages it on negative-advantage responses. Both trainers retain this term separately from all-wrong KL.
 
 ## Evaluation
 
-All standalone evaluations live in [`evaluation/`](evaluation/README.md). Merge a LoRA adapter first if the evaluator expects a complete model:
+Evaluation code is in [`eval/`](eval/). Install `evalplus` for coding and merge a LoRA checkpoint when needed:
 
 ```bash
-python -m evaluation.merge_adapter --base_model Qwen/Qwen3-1.7B \
+pip install evalplus
+python -m eval.merge --base_model Qwen/Qwen3-1.7B \
   --adapter_path outputs/RUN/checkpoint-400 --save_path outputs/RUN/merged
-
-python -m evaluation.math --model_path outputs/RUN/merged --exp_name RUN \
-  --dataset aime --max_tokens 16192 --prompt_style self
-
-bash evaluation/humaneval.sh outputs/RUN/merged
 ```
 
-The math prompt style is explicit: use `external` for external-teacher math and `self` for reference-conditioned math. HumanEval's short wrapper is greedy pass@1; pass@10 requires at least ten sampled completions. Training callbacks are development diagnostics and do not replace benchmark evaluation.
+**Math** — AIME, AMC, HMMT, MATH-500, Minerva, OpenThoughts:
 
-## Reproducibility and credits
+```bash
+python -m eval.math --model_path outputs/RUN/merged --exp_name RUN \
+  --dataset aime --max_tokens 16192 --prompt_style self
+```
 
-[REPRODUCIBILITY.md](REPRODUCIBILITY.md) records paper/source differences, the residual formula, data splits, checkpoint selection, and release checks. [SOURCE_MAP.json](SOURCE_MAP.json) maps retained code to original source hashes. The cleanup excludes checkpoints, run logs, generated answers, caches, and unused experimental variants.
+Use `--prompt_style external` for external-teacher math. The evaluator retains temperature-0.6 sampling; OpenThoughts here is a development diagnostic.
 
-This implementation builds on Hugging Face TRL, OPSD (*Self-Distilled Reasoner*, [paper](https://arxiv.org/abs/2601.18734)), and VERL's SandboxFusion client. Upstream copyright and license notices are retained; see [NOTICE](NOTICE) and [licenses/](licenses/).
+**Coding** — HumanEval+ and MultiPL-E:
+
+```bash
+evalplus.evaluate --model outputs/RUN/merged --dataset humaneval --backend vllm --greedy
+python -m eval.multiple --model outputs/RUN/merged --lang java --out_dir results/multiple/java
+```
+
+Score MultiPL-E outputs with its [official evaluator](https://github.com/nuprl/MultiPL-E). Pass@10 requires at least ten sampled completions; greedy evaluation provides pass@1.
+
+**Medical and biology:** prepare benchmark inputs with `python -m data.prepare --task medical` or `--task mmlupro`, then:
+
+```bash
+python -m eval.qa --model outputs/RUN/merged --task medical \
+  --data data/medical/medqa_test.jsonl --output results/medqa.jsonl
+python -m eval.qa --model outputs/RUN/merged --task biology \
+  --data data/biology/source50.jsonl --output results/biology.jsonl
+python -m eval.qa --model outputs/RUN/merged --task mmlupro \
+  --data data/mmlupro717.jsonl --output results/mmlupro.jsonl
+```
+
+QA uses the original task parsers and saves raw answers. Medical defaults to 8192 tokens; biology/MMLU-Pro use 4096. Match prompts and decoding budgets across checkpoints.
+
+Built on TRL, [OPSD](https://arxiv.org/abs/2601.18734), VERL, and MMLU-Pro helpers. [Apache 2.0](LICENSE).

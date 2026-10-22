@@ -1,25 +1,16 @@
-# Local environments, generated data, model weights, and experiment outputs.
+# Generated data, checkpoints, local environments, and evaluation outputs.
 __pycache__/
 *.py[cod]
 .venv*/
-.env
-.env.*
+.env*
 wandb/
 outputs/
 results/
 *.safetensors
 *.bin
 *.pt
-*.pth
 *.arrow
 *.parquet
 *.log
-checkpoint-*/
-merged*/
-external_teacher/taco_stdin_clean/
-data/*_data/
-data/biology/
-data/code/
-data/*jsonl
-data/medical/
-data/code_original/
+data/*/
+data/*.jsonl
