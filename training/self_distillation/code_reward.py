@@ -12,11 +12,20 @@ import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-ORIGINAL_IMAGE_ID = "sha256:fa95cf1565a2058aed2d45afa77f66448e83b91f081e2fdbf594f0304d2037a3"
 IMAGE = os.environ.get("AOPD_CODE_IMAGE", "ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc")
 TIMEOUT = 10
 N_REWARD_TESTS = 5
 POOL = ThreadPoolExecutor(max_workers=4)
+
+
+def check_docker():
+    """Check Docker access and the grading image before loading a training model."""
+    try:
+        result = subprocess.run(['docker', 'image', 'inspect', IMAGE], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError('Self-coding needs a running Docker daemon accessible to the current user.') from error
+    if result.returncode:
+        raise RuntimeError(f'Docker cannot access the coding image. Check daemon permissions and run: docker pull {IMAGE}')
 
 # Expected outputs never enter the container. Each candidate runs as a child
 # process, with fresh stdin and captured output, not in the grading interpreter.
@@ -73,7 +82,7 @@ def extract_code(completion):
 
 
 def run_code(code, inputs, timeout=TIMEOUT):
-    name = "aopd-taco-20261015-" + uuid.uuid4().hex
+    name = "aopd-code-" + uuid.uuid4().hex
     argv = ["docker", "run", "--rm", "-i", "--name", name,
             "--network", "none", "--read-only", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges", "--pids-limit", "128",
