@@ -41,12 +41,14 @@ pip install flash-attn==2.8.3 --no-build-isolation
 
 There is one `AOPDTrainer` for each setting:
 
-| Setting | Loss implementation | Training entry point |
-| :--- | :--- | :--- |
-| External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py)
-| Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py)
+| Setting | Loss implementation |
+| :--- | :--- |
+| External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py) |
+| Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py) |
 
 Both trainers compute group-relative advantages and apply the clipped AOPD loss. The self-distillation `AOPDTrainer` inherits from `OPSDTrainer` in [`opsd_base.py`](training/self_distillation/opsd_base.py), which inherits from TRL’s `SFTTrainer`. Task prompts and rewards are in [`tasks.py`](training/self_distillation/tasks.py).
+
+**Loss top-k (`--top_k_loss`):** defaults to `0` (full vocabulary) in every task; `--top_k_loss 64` also works well in most settings.
 
 **Mu (`--mu`):** adds forward KL toward the teacher only for groups where every response receives zero reward. It defaults to `0.08` for external math and `0` otherwise. Failed responses in a mixed group receive no extra KL; `--mu 0` disables it.
 
@@ -55,6 +57,7 @@ Both trainers compute group-relative advantages and apply the clipped AOPD loss.
 ## Training
 
 All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model, and optional training arguments follow it.
+
 | Script | Task / data | Steps | Training tokens |
 | :--- | :--- | ---: | ---: |
 | `run_external_math.sh` | OpenThoughts math | 450 | 8192 |
@@ -74,11 +77,7 @@ docker run --rm -p 127.0.0.1:8080:8080 volcengine/sandbox-fusion:server-20250609
 python -m data.prepare --task external_code
 ```
 
-Self-coding executes Python in Docker. Pull its pinned runtime before training:
-
-```bash
-docker pull ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc
-```
+The coding recipes retain their original TACO subsets, splits, prompts, and grading rules: TACO-verified for the external teacher and DeepCoder TACO with reference solutions for self-distillation. Both require Docker; self-distillation downloads its pinned grading image automatically on the first coding run.
 
 **External teacher:** Qwen3-1.7B is the student on both math and coding. We use Qwen3-4B-Instruct-2507 as the teacher for math and Qwen3-8B for coding.
 
@@ -87,7 +86,7 @@ bash scripts/run_external_math.sh Qwen/Qwen3-1.7B
 bash scripts/run_external_code.sh Qwen/Qwen3-1.7B
 ```
 
-**Self-distillation:** Math training uses Qwen3-1.7B/8B. We use tow instruct models (Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507) for the other tasks.
+**Self-distillation:** Math training uses Qwen3-1.7B/8B. We use two instruct models (Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507) for the other tasks.
 
 ```bash
 bash scripts/run_self_math.sh Qwen/Qwen3-8B
