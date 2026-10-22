@@ -8,11 +8,11 @@ Online Policy Distillation (OPD) often outperforms offline methods such as Super
 
 Directly computing these advantages requires trying alternative teacher actions at each step and running new rollouts from each. Instead, we show that the AOPD objective can be estimated using only standard student rollouts and their terminal rewards. Our estimator uses teacher importance weights on the student-sampled actions to provide unbiased advantage-weighted supervision, without any additional rollouts or reward evaluations. This allows AOPD to focus teacher supervision on actions that help the current student while preserving the rollout efficiency of standard OPD. Experiments on math, coding, and Medqa show gains over distillation and RL baselines in both external-teacher and self-distillation settings. 
 
-![AOPD overview](images/aopd_fig-1.png)
+![AOPD overview](images/intro_both.png)
 
 ## Getting Started
 
-Use Python 3.11 on Linux with CUDA GPUs supporting BF16. Clone the repository and run commands from its root:
+Clone the repository and run commands from its root:
 
 ```bash
 git clone https://github.com/Helloworld10011/AOPD.git
