@@ -1,4 +1,4 @@
-# One self-distillation AOPD trainer: grouped rollouts, clipped loss, residual, and all-wrong KL.
+# Buffered AOPDTrainer: one optimizer update of grouped rollouts, clipped loss, residual, and all-wrong KL.
 import math
 from collections import defaultdict
 from functools import partial
@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 from transformers.trainer_utils import seed_worker
 from trl.trainer.utils import RepeatSampler, pad
-from .opsd import OPSDTrainer
+from .opsd_base import OPSDTrainer
 from .tasks import AOPDDataCollator
 
 def _add_tail_bucket(log_probs):
@@ -124,6 +124,7 @@ def _forward_kl_chunk(student_logits, teacher_logits, temperature, top_k, add_ta
     return F.kl_div(s_logp, t_logp, reduction="none", log_target=True).sum(-1)
 
 class AOPDTrainer(OPSDTrainer):
+    """Original buffered and distributed AOPD subclasses combined above the OPSD base."""
 
     def __init__(self, *args, reward_func=None, atd_num_generations=4, w_clip=4.0, mu=0.0, add_tail=True, **kwargs):
         super().__init__(*args, **kwargs)
