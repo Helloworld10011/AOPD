@@ -4,11 +4,6 @@ import json
 import os
 from math import comb
 
-import numpy as np
-import torch
-from datasets import load_dataset
-from vllm import LLM, SamplingParams
-from eval.math_grader import boxed_reward_fn, extract_answer
 
 # ── Config ──
 MAX_K = 4
@@ -36,6 +31,13 @@ def main():
     p.add_argument("--max_tokens",  type=int, default=2048,
                    help="Use 16384 for long-CoT models (e.g. OpenR1)")
     args = p.parse_args()
+    if args.max_tokens <= 0:
+        p.error('--max_tokens must be positive.')
+    import numpy as np
+    import torch
+    from datasets import load_dataset
+    from vllm import LLM, SamplingParams
+    from eval.math_grader import boxed_reward_fn, extract_answer
     global BASE
     BASE = args.output_dir
 
