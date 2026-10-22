@@ -77,7 +77,7 @@ docker run --rm -p 127.0.0.1:8080:8080 volcengine/sandbox-fusion:server-20250609
 python -m data.prepare --task external_code
 ```
 
-The coding recipes retain their original TACO subsets, splits, prompts, and grading rules: TACO-verified for the external teacher and DeepCoder TACO with reference solutions for self-distillation. Both require Docker; self-distillation downloads its pinned grading image automatically on the first coding run.
+The coding recipes retain their original TACO subsets, splits, prompts, and grading rules: TACO-verified for the external teacher and DeepCoder TACO with reference solutions for self-distillation. AOPD and GRPO require Docker to grade coding rollouts; self-distillation downloads its pinned grading image automatically on the first coding run. OPD and OPSD do not execute coding rollouts during training.
 
 **External teacher:** Qwen3-1.7B is the student on both math and coding. We use Qwen3-4B-Instruct-2507 as the teacher for math and Qwen3-8B for coding.
 
@@ -96,6 +96,28 @@ bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
 ```
 
 **Settings:** paper defaults use non-thinking mode, `batch-size = 32`, four responses per group, `temperature = 0.8, top-p = 1, top_k = -1` for AOPD. Learning rate is `2e-5`, except Qwen3 on biology uses `1e-5`. You can override this by `--learning_rate 1e-5 --output_dir outputs/my_run`.
+
+## Baselines
+
+The baselines have separate entry points and use the same task data, student prompts, LoRA rank, and step budgets as above. Run OPD in the external-teacher environment and OPSD in the self-distillation environment; GRPO uses the environment selected by `--setting`. The distillation baselines use plain KL without AOPD advantage weighting or residual terms.
+
+| Baseline | Source | Objective |
+| :--- | :--- | :--- |
+| OPD-FKL / OPD-RKL | [`opd_train.py`](training/external_teacher/opd_train.py) | Plain forward or reverse KL to the external teacher |
+| OPSD | [`opsd_train.py`](training/self_distillation/opsd_train.py) | Forward KL to the frozen base model with a reference solution |
+| GRPO | [`grpo_train.py`](training/grpo_train.py) | Group-relative reward optimization; no teacher |
+
+```bash
+bash scripts/run_baseline.sh opd Qwen/Qwen3-1.7B --task math --divergence fkl
+bash scripts/run_baseline.sh opd Qwen/Qwen3-1.7B --task math --divergence rkl
+bash scripts/run_baseline.sh opsd Qwen/Qwen3-8B --task math
+bash scripts/run_baseline.sh grpo Qwen/Qwen3-1.7B --setting external --task math
+bash scripts/run_baseline.sh grpo Qwen/Qwen3-4B-Instruct-2507 --setting self --task biology
+```
+
+OPD also supports `--task code`; OPSD and self-setting GRPO support all four self-distillation tasks. Distillation defaults to `--top_k_loss 0`. OPD/OPSD use LR `5e-6` (OPSD biology: `2e-5`); GRPO uses `5e-6` for math, `1e-5` for medical, and `2e-5` for biology/coding. Override with `--learning_rate` as needed.
+
+GRPO keeps `loss_type="grpo"`, no KL penalty, no reward standardization, and masked truncated completions. It samples eight responses per group in the external setting and four in the self setting; default accumulation is eight and four respectively. Baseline outputs have separate directories under `outputs/`.
 
 ## Evaluation
 
