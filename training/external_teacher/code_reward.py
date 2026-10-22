@@ -33,6 +33,19 @@ API_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
 
+
+def check_sandbox(url='http://127.0.0.1:8080/run_code'):
+    """Fail before preparing data or training if SandboxFusion cannot execute Python."""
+    try:
+        response = requests.post(url, json={'language': 'python', 'code': 'print("aopd-ready")'}, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+        run = result.get('run_result') or {}
+        if result.get('status') != 'Success' or run.get('return_code') != 0 or run.get('stdout', '').strip() != 'aopd-ready':
+            raise ValueError('Python execution did not succeed.')
+    except (requests.RequestException, ValueError, TypeError) as error:
+        raise RuntimeError(f'Start SandboxFusion on port 8080 before preparing or training external coding data: {error}') from error
+
 # Define supported languages list (optional, for documentation or validation)
 SUPPORTED_LANGUAGES = [
     "python",
