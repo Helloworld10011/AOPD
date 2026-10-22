@@ -4,6 +4,7 @@
 Five-test fractional reward and newline-only output comparison match the existing
 opsd_train_taco_lcb.py / VERL SandboxFusion path. Full-suite pass rate is separate.
 """
+
 import ast
 import json
 import os
@@ -12,7 +13,10 @@ import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-IMAGE = os.environ.get("AOPD_CODE_IMAGE", "ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc")
+IMAGE = os.environ.get(
+    "AOPD_CODE_IMAGE",
+    "ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc",
+)
 TIMEOUT = 10
 N_REWARD_TESTS = 5
 POOL = ThreadPoolExecutor(max_workers=4)
@@ -21,16 +25,26 @@ POOL = ThreadPoolExecutor(max_workers=4)
 def check_docker():
     """Ensure the original grading image is available before loading a training model."""
     try:
-        result = subprocess.run(['docker', 'image', 'inspect', IMAGE], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["docker", "image", "inspect", IMAGE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         if result.returncode:
-            print('Downloading the pinned coding runtime (first run only)...', flush=True)
-            subprocess.run(['docker', 'pull', IMAGE], check=True, timeout=600)
+            print(
+                "Downloading the pinned coding runtime (first run only)...", flush=True
+            )
+            subprocess.run(["docker", "pull", IMAGE], check=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
-        raise RuntimeError('Self-coding needs access to a running Docker daemon and its pinned grading image.') from error
+        raise RuntimeError(
+            "Self-coding needs access to a running Docker daemon and its pinned grading image."
+        ) from error
+
 
 # Expected outputs never enter the container. Each candidate runs as a child
 # process, with fresh stdin and captured output, not in the grading interpreter.
-DRIVER = r'''
+DRIVER = r"""
 import json,os,resource,signal,subprocess,sys,tempfile
 request=json.load(sys.stdin)
 resource.setrlimit(resource.RLIMIT_FSIZE,(1048576,1048576))
@@ -52,7 +66,7 @@ with tempfile.TemporaryDirectory() as d:
             out.seek(0);err.seek(0)
             results.append({"status":status,"returncode":p.returncode,"stdout":out.read(1048576).decode(errors="replace"),"stderr":err.read(2048).decode(errors="replace")})
     print(json.dumps(results))
-'''
+"""
 
 
 def extract_code(completion):
@@ -84,17 +98,51 @@ def extract_code(completion):
 
 def run_code(code, inputs, timeout=TIMEOUT):
     name = "aopd-code-" + uuid.uuid4().hex
-    argv = ["docker", "run", "--rm", "-i", "--name", name,
-            "--network", "none", "--read-only", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--pids-limit", "128",
-            "--memory", "1g", "--memory-swap", "1g", "--cpus", "1",
-            "--tmpfs", "/tmp:rw,nosuid,size=64m", "--user", "65534:65534",
-            "--entrypoint", "python3", IMAGE, "-I", "-c", DRIVER]
+    argv = [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        name,
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "128",
+        "--memory",
+        "1g",
+        "--memory-swap",
+        "1g",
+        "--cpus",
+        "1",
+        "--tmpfs",
+        "/tmp:rw,nosuid,size=64m",
+        "--user",
+        "65534:65534",
+        "--entrypoint",
+        "python3",
+        IMAGE,
+        "-I",
+        "-c",
+        DRIVER,
+    ]
     try:
-        result = subprocess.run(argv, input=json.dumps({"code": code, "inputs": inputs, "timeout": timeout}),
-                                text=True, capture_output=True, timeout=(timeout + 2) * len(inputs) + 30)
+        result = subprocess.run(
+            argv,
+            input=json.dumps({"code": code, "inputs": inputs, "timeout": timeout}),
+            text=True,
+            capture_output=True,
+            timeout=(timeout + 2) * len(inputs) + 30,
+        )
         if result.returncode:
-            raise RuntimeError(f"Docker verifier failed ({result.returncode}): {result.stderr[-2000:]}")
+            raise RuntimeError(
+                f"Docker verifier failed ({result.returncode}): {result.stderr[-2000:]}"
+            )
         rows = json.loads(result.stdout)
         if len(rows) != len(inputs):
             raise RuntimeError("Verifier result count mismatch")
@@ -111,18 +159,38 @@ def score_details(completion, ground_truth, test_limit=N_REWARD_TESTS):
     if tests.get("fn_name"):
         raise ValueError("This frozen task supports stdin problems only")
     inputs, outputs = tests["inputs"], tests["outputs"]
-    if not inputs or len(inputs) != len(outputs) or not all(isinstance(x, str) for x in inputs + outputs):
+    if (
+        not inputs
+        or len(inputs) != len(outputs)
+        or not all(isinstance(x, str) for x in inputs + outputs)
+    ):
         raise ValueError("Invalid stdin test cases")
     if test_limit:
         inputs, outputs = inputs[:test_limit], outputs[:test_limit]
     code = extract_code(completion)
     if code is None:
-        return {"fraction": 0.0, "all_pass": 0.0, "passed": [False] * len(inputs), "missing_code": True}
+        return {
+            "fraction": 0.0,
+            "all_pass": 0.0,
+            "passed": [False] * len(inputs),
+            "missing_code": True,
+        }
     rows = run_code(code, inputs)
-    passed = [r["status"] == "finished" and r["returncode"] == 0 and r["stdout"].rstrip("\n") == target.rstrip("\n")
-              for r, target in zip(rows, outputs)]
-    return {"fraction": sum(passed) / len(passed), "all_pass": float(all(passed)), "passed": passed,
-            "missing_code": False, "execution": [{k: r[k] for k in ("status", "returncode", "stderr")} for r in rows]}
+    passed = [
+        r["status"] == "finished"
+        and r["returncode"] == 0
+        and r["stdout"].rstrip("\n") == target.rstrip("\n")
+        for r, target in zip(rows, outputs)
+    ]
+    return {
+        "fraction": sum(passed) / len(passed),
+        "all_pass": float(all(passed)),
+        "passed": passed,
+        "missing_code": False,
+        "execution": [
+            {k: r[k] for k in ("status", "returncode", "stderr")} for r in rows
+        ],
+    }
 
 
 def correct_reward(prompts, completions, ground_truth, **kwargs):
