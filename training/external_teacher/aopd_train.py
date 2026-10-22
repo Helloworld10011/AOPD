@@ -1,99 +1,77 @@
-# Train external-teacher AOPD on math or coding with the same trainer.
-import argparse
-import math
+# External-teacher AOPD. Experiment settings are listed in scripts/run_external_*.sh.
 import os
-import random
-from pathlib import Path
-from .tasks import load_training_data, get_reward
+from training.arguments import (
+    EXTERNAL_ZERO2,
+    ExternalAOPDArguments,
+    model_kwargs,
+    parse_arguments,
+)
+from .tasks import get_reward, load_training_data
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['math','code'], required=True)
-    parser.add_argument('--model', default='Qwen/Qwen3-1.7B')
-    parser.add_argument('--learning_rate', type=float, default=2e-5)
-    parser.add_argument('--max_steps', type=int, default=None)
-    parser.add_argument('--output_dir', default=None)
-    parser.add_argument('--data_dir', default='data/external_code')
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--accumulation', type=int, default=4)
-    parser.add_argument('--top_k_loss', type=int, default=0, help='Teacher top-k for the loss; 0 uses the full vocabulary.')
-    parser.add_argument('--mu', type=float, default=None)
-    parser.add_argument('--report_to', default='none')
-    args = parser.parse_args(argv)
-    args.max_steps = (450 if args.task == 'math' else 350) if args.max_steps is None else args.max_steps
-    args.mu = (.08 if args.task == 'math' else 0.) if args.mu is None else args.mu
-    args.output_dir = args.output_dir or f'outputs/aopd_external_{args.task}'
-    if any(getattr(args, name) <= 0 for name in ('max_steps', 'batch_size', 'accumulation')):
-        parser.error('Steps, batch size, and accumulation must be positive.')
-    if args.batch_size * args.accumulation % 4:
-        parser.error('batch_size * accumulation must be divisible by four for complete local reward groups.')
-    if args.top_k_loss < 0:
-        parser.error('--top_k_loss must be zero (full vocabulary) or a positive integer.')
-    if not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not math.isfinite(args.mu) or args.mu < 0:
-        parser.error('Learning rate must be positive and mu must be nonnegative; both must be finite.')
-    return args
-
-
-def build_config(args, local_rank):
     from trl.experimental.distillation import DistillationConfig
-    cap = 8192 if args.task == 'math' else 4096
-    deepspeed = {'train_batch_size':'auto', 'train_micro_batch_size_per_gpu':'auto',
-                 'gradient_accumulation_steps':'auto', 'gradient_clipping':'auto',
-                 'zero_allow_untested_optimizer':True, 'bf16':{'enabled':'auto'},
-                 'zero_optimization':{'stage':2, 'allgather_partitions':True, 'allgather_bucket_size':5e8,
-                  'overlap_comm':False, 'reduce_scatter':True, 'reduce_bucket_size':5e8,
-                  'contiguous_gradients':True, 'round_robin_gradients':True}}
-    extra = {} if args.task == 'math' else {'max_prompt_length':2048, 'vllm_max_model_length':6144}
-    return DistillationConfig(
-        output_dir=args.output_dir, run_name=Path(args.output_dir).name, deepspeed=deepspeed,
-        seed=args.seed, learning_rate=args.learning_rate, max_steps=args.max_steps,
-        bf16=True, gradient_checkpointing=True, gradient_checkpointing_kwargs={'use_reentrant':False},
-        disable_dropout=True, per_device_train_batch_size=args.batch_size,
-        gradient_accumulation_steps=args.accumulation, num_generations=4,
-        lmbda=1., beta=0., loss_top_k=args.top_k_loss, loss_add_tail=True,
-        max_completion_length=cap, max_length=9500 if args.task=='math' else 6144,
-        temperature=.8, top_p=1., top_k=-1, use_vllm=True, vllm_mode='colocate',
-        vllm_gpu_memory_utilization=.2, logging_steps=10, logging_first_step=True,
-        eval_strategy='no', save_strategy='steps', save_steps=25, save_only_model=True,
-        dataloader_drop_last=True, max_grad_norm=.1, weight_decay=0.,
-        lr_scheduler_type='cosine', warmup_ratio=.05, report_to=args.report_to,
-        model_init_kwargs={'dtype':'bfloat16','use_cache':False,'attn_implementation':'flash_attention_2'},
-        teacher_model_init_kwargs={'dtype':'bfloat16','attn_implementation':'flash_attention_2','device_map':{'':local_rank}},
-        **extra)
+
+    return parse_arguments(
+        ExternalAOPDArguments,
+        DistillationConfig,
+        argv,
+        output_dir="outputs/aopd_external",
+        loss_top_k=0,
+        deepspeed=EXTERNAL_ZERO2,
+    )
 
 
 def main():
-    args = parse_args()
+    script, config, model = parse_args()
     import torch
-    from peft import LoraConfig
     from transformers import AutoTokenizer
+    from trl import get_peft_config
     from .aopd_trainer import AOPDTrainer
 
-    if not torch.cuda.is_available():
-        raise RuntimeError('AOPD training requires CUDA GPUs with BF16 support.')
-    rank = int(os.environ.get('LOCAL_RANK',0))
+    rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(rank)
-    random.seed(args.seed); torch.manual_seed(args.seed)
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    config.model_init_kwargs = {
+        **model_kwargs(model, config.gradient_checkpointing),
+        **(config.model_init_kwargs or {}),
+    }
+    config.teacher_model_init_kwargs = {
+        "dtype": "bfloat16",
+        "attn_implementation": model.attn_implementation or "flash_attention_2",
+        "device_map": {"": rank},
+        "revision": script.teacher_revision,
+        **(config.teacher_model_init_kwargs or {}),
+    }
+    tokenizer = AutoTokenizer.from_pretrained(
+        model.model_name_or_path,
+        revision=model.model_revision,
+        trust_remote_code=model.trust_remote_code,
+    )
     original_template = tokenizer.apply_chat_template
-    def nonthinking(*values, **kwargs):
-        kwargs.setdefault('enable_thinking',False)
-        return original_template(*values,**kwargs)
-    tokenizer.apply_chat_template = nonthinking
-    dataset, lookup = load_training_data(args,tokenizer)
-    lora = LoraConfig(r=64,lora_alpha=128,lora_dropout=0.,bias='none',task_type='CAUSAL_LM',
-                      target_modules=['q_proj','k_proj','v_proj','o_proj','up_proj','gate_proj','down_proj'])
-    trainer = AOPDTrainer(model=args.model,
-        teacher_model='Qwen/Qwen3-4B-Instruct-2507' if args.task=='math' else 'Qwen/Qwen3-8B',
-        args=build_config(args,rank),processing_class=tokenizer,peft_config=lora,
-        train_dataset=dataset,reward_func=get_reward(args.task),answer_lookup=lookup,mu=args.mu)
-    trainer.train()
-    trainer.save_model(args.output_dir)
+
+    def chat_template(*values, **kwargs):
+        kwargs["enable_thinking"] = script.student_thinking
+        return original_template(*values, **kwargs)
+
+    tokenizer.apply_chat_template = chat_template
+    dataset, lookup = load_training_data(script, tokenizer, seed=config.seed)
+    trainer = AOPDTrainer(
+        model=model.model_name_or_path,
+        teacher_model=script.teacher_model,
+        args=config,
+        processing_class=tokenizer,
+        peft_config=get_peft_config(model),
+        train_dataset=dataset,
+        reward_func=get_reward(script.task),
+        answer_lookup=lookup,
+        w_clip=script.atd_w_clip,
+        mu=script.atd_mu,
+    )
+    trainer.train(resume_from_checkpoint=script.resume_checkpoint)
+    trainer.save_model(config.output_dir)
     if trainer.is_world_process_zero():
-        tokenizer.save_pretrained(args.output_dir)
+        tokenizer.save_pretrained(config.output_dir)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
