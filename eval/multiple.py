@@ -1,21 +1,24 @@
 # Generate MultiPL-E completions with the original language stop tokens; scoring is a separate step.
 import argparse, json, os
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=7319)
     ap.add_argument("--model", required=True)
-    ap.add_argument("--lang",  required=True)
+    ap.add_argument("--lang", required=True)
     ap.add_argument("--out_dir", required=True, help="dir to save per-problem JSONs")
     ap.add_argument("--tp", type=int, default=1)
     ap.add_argument("--max_tokens", type=int, default=512)
     args = ap.parse_args()
     if min(args.n, args.tp, args.max_tokens) < 1 or args.temperature < 0:
-        ap.error('n, tp, and max_tokens must be positive; temperature must be nonnegative.')
+        ap.error(
+            "n, tp, and max_tokens must be positive; temperature must be nonnegative."
+        )
     if args.n > 1 and args.temperature == 0:
-        ap.error('Use --temperature greater than zero when --n is greater than one.')
+        ap.error("Use --temperature greater than zero when --n is greater than one.")
 
     from datasets import load_dataset
     from vllm import LLM, SamplingParams
@@ -48,10 +51,10 @@ def main():
     # Write one file per problem
     for ex, out in zip(ds, outputs):
         rec = {
-            "name":        ex["name"],
-            "language":    ex["language"],
-            "prompt":      ex["prompt"],
-            "tests":       ex["tests"],
+            "name": ex["name"],
+            "language": ex["language"],
+            "prompt": ex["prompt"],
+            "tests": ex["tests"],
             "stop_tokens": ex["stop_tokens"],
             "completions": [x.text for x in out.outputs],
         }
@@ -59,6 +62,7 @@ def main():
             json.dump(rec, f)
 
     print(f"Saved {len(ds)} files to {args.out_dir}")
+
 
 if __name__ == "__main__":
     main()
