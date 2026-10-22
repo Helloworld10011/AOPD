@@ -19,6 +19,7 @@ def parse_args(argv=None):
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--accumulation', type=int, default=4)
     parser.add_argument('--num_generations', type=int, default=4)
+    parser.add_argument('--top_k_loss', type=int, default=0, help='Teacher top-k for the loss; 0 uses the full vocabulary.')
     parser.add_argument('--mu', type=float, default=0.)
     parser.add_argument('--report_to', default='none')
     args = parser.parse_args(argv)
@@ -36,6 +37,8 @@ def parse_args(argv=None):
     global_batch = args.batch_size * args.accumulation * int(os.environ.get('WORLD_SIZE', 1))
     if args.num_generations < 2 or global_batch % args.num_generations:
         parser.error('num_generations must be at least two and divide the global generation batch.')
+    if args.top_k_loss < 0:
+        parser.error('--top_k_loss must be zero (full vocabulary) or a positive integer.')
     if not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not math.isfinite(args.mu) or args.mu < 0:
         parser.error('Learning rate must be positive and mu must be nonnegative; both must be finite.')
     if args.max_completion_length >= (35000 if args.task == 'math' else 20000):
@@ -91,7 +94,7 @@ def main():
         processing_class=tokenizer, data_collator=collator, peft_config=lora,
         fixed_teacher=True, reason_first=False, use_ema_teacher=False,
         student_thinking=False, teacher_thinking=False,
-        top_k_loss=None if args.task == 'math' else 64, jsd_token_clip=None,
+        top_k_loss=args.top_k_loss, jsd_token_clip=None,
         reward_func=get_reward(args.task), atd_num_generations=args.num_generations,
         w_clip=4., mu=args.mu)
     trainer.train()
