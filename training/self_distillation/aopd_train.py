@@ -1,12 +1,8 @@
 # Train self-distillation AOPD on any of the four main paper tasks.
 import argparse
+import math
+import os
 from pathlib import Path
-import torch
-from peft import LoraConfig
-from transformers import AutoTokenizer
-from trl.experimental.gold import GOLDConfig
-from .trainer import AOPDTrainer
-from .tasks import AOPDDataCollator, get_reward, load_training_data
 
 
 def parse_args(argv=None):
@@ -24,18 +20,31 @@ def parse_args(argv=None):
     parser.add_argument('--accumulation', type=int, default=4)
     parser.add_argument('--num_generations', type=int, default=4)
     parser.add_argument('--mu', type=float, default=0.)
-    parser.add_argument('--report_to', default='wandb')
+    parser.add_argument('--report_to', default='none')
     args = parser.parse_args(argv)
     if args.task != 'math' and args.mu:
         parser.error('--mu is used only by the all-wrong math recipe.')
-    args.learning_rate = args.learning_rate or (1e-5 if args.task == 'biology' and 'Qwen3' in args.model else 2e-5)
-    args.max_steps = args.max_steps or (300 if args.task == 'medical' else 400)
-    args.max_completion_length = args.max_completion_length or {'math':8192, 'medical':2048, 'biology':4096, 'code':4096}[args.task]
+    if args.learning_rate is None:
+        args.learning_rate = 1e-5 if args.task == 'biology' and 'Qwen3' in args.model else 2e-5
+    if args.max_steps is None:
+        args.max_steps = 300 if args.task == 'medical' else 400
+    if args.max_completion_length is None:
+        args.max_completion_length = {'math':8192, 'medical':2048, 'biology':4096, 'code':4096}[args.task]
     args.output_dir = args.output_dir or f'outputs/aopd_{args.task}_{args.model.split("/")[-1]}'
+    if any(getattr(args, name) <= 0 for name in ('max_steps', 'max_completion_length', 'batch_size', 'accumulation')):
+        parser.error('Steps, completion length, batch size, and accumulation must be positive.')
+    global_batch = args.batch_size * args.accumulation * int(os.environ.get('WORLD_SIZE', 1))
+    if args.num_generations < 2 or global_batch % args.num_generations:
+        parser.error('num_generations must be at least two and divide the global generation batch.')
+    if not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not math.isfinite(args.mu) or args.mu < 0:
+        parser.error('Learning rate must be positive and mu must be nonnegative; both must be finite.')
+    if args.max_completion_length >= (35000 if args.task == 'math' else 20000):
+        parser.error('Completion length must leave room for the prompt in the context window.')
     return args
 
 
 def build_config(args):
+    from trl.experimental.gold import GOLDConfig
     # ZeRO-2 is embedded here so no separate configuration file is needed.
     deepspeed = {'train_batch_size':'auto', 'train_micro_batch_size_per_gpu':'auto',
                  'gradient_accumulation_steps':'auto', 'gradient_clipping':'auto',
@@ -56,12 +65,20 @@ def build_config(args):
         deepspeed=deepspeed, bf16=True, eval_strategy='no',
         save_steps=25, logging_steps=2, save_only_model=args.task in ('math','medical'),
         report_to=args.report_to, dataset_kwargs={'skip_prepare_dataset':True},
-        model_init_kwargs={'revision':args.revision, 'dtype':torch.bfloat16,
+        model_init_kwargs={'revision':args.revision, 'dtype':'bfloat16',
                            'attn_implementation':'flash_attention_2', 'use_cache':False})
 
 
 def main():
     args = parse_args()
+    import torch
+    from peft import LoraConfig
+    from transformers import AutoTokenizer
+    from .aopd_trainer import AOPDTrainer
+    from .tasks import AOPDDataCollator, get_reward, load_training_data
+
+    if not torch.cuda.is_available():
+        raise RuntimeError('AOPD training requires CUDA GPUs with BF16 support.')
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=args.revision, padding_side='left')
     tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
     config = build_config(args)
@@ -79,6 +96,8 @@ def main():
         w_clip=4., mu=args.mu)
     trainer.train()
     trainer.save_model(config.output_dir)
+    if trainer.is_world_process_zero():
+        tokenizer.save_pretrained(config.output_dir)
 
 
 if __name__ == '__main__':
