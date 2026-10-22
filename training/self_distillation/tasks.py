@@ -2,7 +2,7 @@
 from pathlib import Path
 import torch
 from datasets import load_dataset, load_from_disk
-from .opsd import SelfDistillationDataCollator
+from .opsd_base import SelfDistillationDataCollator
 
 
 def load_training_data(task, data_dir=None):
@@ -18,6 +18,8 @@ def load_training_data(task, data_dir=None):
         data = data.map(prepare, remove_columns=data.column_names)
     else:
         root = Path(data_dir or f'data/{task}')
+        if not (root / 'train_data').is_dir():
+            raise FileNotFoundError(f'Prepare {task} data first: python -m data.prepare --task {task}')
         data = load_from_disk(str(root / 'train_data'))
         data = data.rename_columns({'messages': 'problem', 'output_text': 'solution'})
         if 'Answer' not in data.column_names:
@@ -27,7 +29,8 @@ def load_training_data(task, data_dir=None):
 
 def get_reward(task):
     if task == 'code':
-        from .code_reward import correct_reward
+        from .code_reward import correct_reward, check_docker
+        check_docker()
         return correct_reward
     if task == 'math':
         from eval.math_grader import boxed_reward_fn, timeout
