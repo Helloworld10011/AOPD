@@ -4,15 +4,17 @@ import json
 import os
 from math import comb
 
-
 # ── Config ──
 MAX_K = 4
 KS = [1, 2, 4]
 PASS_TEMPERATURE = 0.6
 ACC_TEMPERATURE = 0.6
 
-SYSTEM_PROMPT = "Please reason step by step, and put your final answer within \\boxed{}."
+SYSTEM_PROMPT = (
+    "Please reason step by step, and put your final answer within \\boxed{}."
+)
 BASE = "results/math"
+
 
 def pass_at_k(n: int, c: int, k: int) -> float:
     if n - c < k:
@@ -22,22 +24,36 @@ def pass_at_k(n: int, c: int, k: int) -> float:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--prompt_style", choices=["external", "self"], default="external", help="Match the training prompt; never infer it from the model filename.")
+    p.add_argument(
+        "--prompt_style",
+        choices=["external", "self"],
+        default="external",
+        help="Match the training prompt; never infer it from the model filename.",
+    )
     p.add_argument("--output_dir", default="results/math")
-    p.add_argument("--model_path",  type=str, required=True)
-    p.add_argument("--exp_name",    type=str, required=True)
-    p.add_argument("--dataset",     type=str, required=True,
-                   choices=["aime", "amc", "math500", "hmmt", "minerva", "openthoughts"])
-    p.add_argument("--max_tokens",  type=int, default=2048,
-                   help="Use 16384 for long-CoT models (e.g. OpenR1)")
+    p.add_argument("--model_path", type=str, required=True)
+    p.add_argument("--exp_name", type=str, required=True)
+    p.add_argument(
+        "--dataset",
+        type=str,
+        required=True,
+        choices=["aime", "amc", "math500", "hmmt", "minerva", "openthoughts"],
+    )
+    p.add_argument(
+        "--max_tokens",
+        type=int,
+        default=2048,
+        help="Use 16384 for long-CoT models (e.g. OpenR1)",
+    )
     args = p.parse_args()
     if args.max_tokens <= 0:
-        p.error('--max_tokens must be positive.')
+        p.error("--max_tokens must be positive.")
     import numpy as np
     import torch
     from datasets import load_dataset
     from vllm import LLM, SamplingParams
     from eval.math_grader import boxed_reward_fn, extract_answer
+
     global BASE
     BASE = args.output_dir
 
@@ -88,7 +104,12 @@ def main():
         if args.prompt_style == "self":
             prompts.append(
                 tokenizer.apply_chat_template(
-                    [{"role": "user", "content": f"Problem: {item['problem']}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}."}],
+                    [
+                        {
+                            "role": "user",
+                            "content": f"Problem: {item['problem']}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}.",
+                        }
+                    ],
                     tokenize=False,
                     add_generation_prompt=True,
                     enable_thinking=False,
@@ -97,8 +118,10 @@ def main():
         else:
             prompts.append(
                 tokenizer.apply_chat_template(
-                    [{"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": item["problem"]}],
+                    [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": item["problem"]},
+                    ],
                     tokenize=False,
                     add_generation_prompt=True,
                     enable_thinking=False,
@@ -106,15 +129,25 @@ def main():
             )
 
     pass_sampling = SamplingParams(
-        temperature=0.6, top_p=0.95, top_k=20, min_p=0.0, max_tokens=args.max_tokens, n=MAX_K,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        min_p=0.0,
+        max_tokens=args.max_tokens,
+        n=MAX_K,
     )
     acc_sampling = SamplingParams(
-        temperature=0.6, top_p=0.95, top_k=20, min_p=0.0, max_tokens=args.max_tokens, n=1,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        min_p=0.0,
+        max_tokens=args.max_tokens,
+        n=1,
     )
 
     # ── Generate ──
     pass_outputs = llm.generate(prompts, pass_sampling)
-    acc_outputs  = llm.generate(prompts, acc_sampling)
+    acc_outputs = llm.generate(prompts, acc_sampling)
 
     # ── Score & Save ──
     data_path = f"{base_dir}/{args.exp_name}.jsonl"
@@ -123,7 +156,7 @@ def main():
         os.remove(data_path)
 
     all_n_correct = []
-    acc_corrects  = []
+    acc_corrects = []
 
     for pass_output, acc_output, item in zip(pass_outputs, acc_outputs, dataset):
         item = dict(item)
@@ -131,8 +164,8 @@ def main():
 
         # pass@k samples
         pass_solutions = [comp.text for comp in pass_output.outputs]
-        pass_answers   = []
-        pass_corrects  = []
+        pass_answers = []
+        pass_corrects = []
         for sol in pass_solutions:
             _, reward = boxed_reward_fn(sol, gold)
             pass_answers.append(extract_answer(sol))
@@ -140,16 +173,16 @@ def main():
 
         # Independent sampled accuracy at temperature 0.6 (source decoding).
         acc_solution = acc_output.outputs[0].text
-        acc_answer   = extract_answer(acc_solution)
+        acc_answer = extract_answer(acc_solution)
         _, acc_reward = boxed_reward_fn(acc_solution, gold)
-        acc_correct   = bool(acc_reward > 0)
+        acc_correct = bool(acc_reward > 0)
 
         item["pass_predicted_answers"] = pass_answers
-        item["pass_correct"]           = pass_corrects
-        item["pass_solutions"]         = pass_solutions
-        item["acc_predicted_answer"]   = acc_answer
-        item["acc_correct"]            = acc_correct
-        item["acc_solution"]           = acc_solution
+        item["pass_correct"] = pass_corrects
+        item["pass_solutions"] = pass_solutions
+        item["acc_predicted_answer"] = acc_answer
+        item["acc_correct"] = acc_correct
+        item["acc_solution"] = acc_solution
 
         with open(data_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
@@ -172,10 +205,10 @@ def main():
         vals = [pass_at_k(MAX_K, c, k) for c in all_n_correct]
         summary[f"pass@{k}"] = float(np.mean(vals))
 
-    summary["sampled_acc@1"]           = float(np.mean(acc_corrects))
+    summary["sampled_acc@1"] = float(np.mean(acc_corrects))
     summary["n_correct_sampled_acc@1"] = int(sum(acc_corrects))
-    summary["n_total"]               = n_problems
-    summary["avg_sample_acc"]        = float(np.mean(all_n_correct) / MAX_K)
+    summary["n_total"] = n_problems
+    summary["avg_sample_acc"] = float(np.mean(all_n_correct) / MAX_K)
 
     print(f"\n{'=' * 50}")
     print(f"  {args.exp_name}")
@@ -184,8 +217,10 @@ def main():
     print(f"{'=' * 50}")
     for k in ks:
         print(f"pass@{k}: {summary[f'pass@{k}']:.4f}")
-    print(f"sampled_acc@1: {summary['sampled_acc@1']:.4f} "
-          f"({summary['n_correct_sampled_acc@1']}/{n_problems})")
+    print(
+        f"sampled_acc@1: {summary['sampled_acc@1']:.4f} "
+        f"({summary['n_correct_sampled_acc@1']}/{n_problems})"
+    )
     print(f"avg_sample_acc: {summary['avg_sample_acc']:.4f}")
 
     summary_path = f"{base_dir}/summary.jsonl"
