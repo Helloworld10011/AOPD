@@ -1,4 +1,4 @@
-# Retained OPSD/GOLD infrastructure: generation, reference-conditioned teacher, and distribution matching.
+# OPSD base class used by AOPDTrainer for generation and reference-conditioned teacher inference.
 # Modified: the original data collator is included in this file.
 # Copyright 2020-2025 The HuggingFace Team. All rights reserved.
 #
