@@ -1,4 +1,4 @@
-# Generated data, checkpoints, local environments, and evaluation outputs.
+# Keep downloaded data, model weights, environments, and generated results out of Git.
 __pycache__/
 *.py[cod]
 .venv*/
