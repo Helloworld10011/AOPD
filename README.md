@@ -96,7 +96,7 @@ bash scripts/run_self_biology.sh Qwen/Qwen3-4B-Instruct-2507
 bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
 ```
 
-**Settings:** paper defaults use non-thinking mode, `batch-size = 32`, four responses per group, `temperature = 0.8, top-p = 1, top_k = -1` for AOPD. Learning rate is `2e-5`, except Qwen3 on biology uses `1e-5`. Override directly, e.g. append `--learning_rate 1e-5 --output_dir outputs/my_run`.
+**Settings:** paper defaults use non-thinking mode, `batch-size = 32`, four responses per group, `temperature = 0.8, top-p = 1, top_k = -1` for AOPD. Learning rate is `2e-5`, except Qwen3 on biology uses `1e-5`. You can override this by `--learning_rate 1e-5 --output_dir outputs/my_run`.
 
 ## Evaluation
 
