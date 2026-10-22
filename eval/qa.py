@@ -151,6 +151,8 @@ def main():
     parser.add_argument('--tp',type=int,default=1)
     parser.add_argument('--max_tokens',type=int,default=None)
     args=parser.parse_args()
+    if args.tp < 1 or (args.max_tokens is not None and args.max_tokens < 1):
+        parser.error('--tp and --max_tokens must be positive.')
     dest=Path(args.output)
     if dest.exists():raise FileExistsError(f'Do not overwrite an evaluation: {dest}')
     from vllm import LLM, SamplingParams
