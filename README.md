@@ -46,7 +46,7 @@ There is one `AOPDTrainer` for each setting:
 | External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py) | [`external_teacher/aopd_train.py`](training/external_teacher/aopd_train.py) |
 | Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py) | [`self_distillation/aopd_train.py`](training/self_distillation/aopd_train.py) |
 
-Both trainers compute group-relative advantages and apply the clipped AOPD loss. The self-distillation `AOPDTrainer` includes the buffered implementation: it generates one full group batch, computes group advantages across GPUs, then reuses those rollouts across the gradient-accumulation microbatches for that update. It inherits from `OPSDTrainer` in [`opsd_base.py`](training/self_distillation/opsd_base.py), which inherits from TRL’s `SFTTrainer`. Task prompts and rewards are in [`tasks.py`](training/self_distillation/tasks.py).
+Both trainers compute group-relative advantages and apply the clipped AOPD loss. The self-distillation `AOPDTrainer` inherits from `OPSDTrainer` in [`opsd_base.py`](training/self_distillation/opsd_base.py), which inherits from TRL’s `SFTTrainer`. Task prompts and rewards are in [`tasks.py`](training/self_distillation/tasks.py).
 
 **Mu (`--mu`):** adds forward KL toward the teacher only for groups where every response receives zero reward. It defaults to `0.08` for external math and `0` otherwise. Failed responses in a mixed group receive no extra KL; `--mu 0` disables it.
 
@@ -123,7 +123,7 @@ evalplus.evaluate --model path/to/model --dataset humaneval --backend vllm --gre
 python -m eval.multiple --model path/to/model --lang java --out_dir results/multiple/java
 ```
 
-Score MultiPL-E outputs with its [official evaluator](https://github.com/nuprl/MultiPL-E). Pass@10 requires at least ten sampled completions; greedy evaluation provides pass@1.
+Score MultiPL-E outputs with its [official evaluator](https://github.com/nuprl/MultiPL-E). Pass@10 for `HumanEval` requires at least ten sampled completions; greedy evaluation provides pass@1.
 
 **Medical and biology:** prepare benchmark inputs with `python -m data.prepare --task medical` or `--task mmlupro`, then:
 
@@ -136,4 +136,4 @@ python -m eval.qa --model path/to/model --task mmlupro \
   --data data/mmlupro717.jsonl --output results/mmlupro.jsonl
 ```
 
-QA uses the original task parsers and saves raw answers. Medical defaults to 8192 tokens; biology/MMLU-Pro use 4096. Match prompts and decoding budgets across checkpoints.
+QA uses the original task parsers and saves raw answers. Medical defaults to 8192 tokens; biology/MMLU-Pro use 4096.
