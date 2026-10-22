@@ -1,4 +1,4 @@
-# OPSD/GOLD environment recorded on the source machine (Python 3.11).
+# Buffered self-distillation AOPD / OPSD base: pinned runtime for Python 3.11; install FlashAttention separately.
 torch==2.8.0
 transformers==4.57.1
 trl==0.26.0
