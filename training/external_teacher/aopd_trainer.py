@@ -1,4 +1,4 @@
-# External-teacher AOPD: leave-one-out advantages, clipped core, residual, and all-wrong group KL.
+# AOPDTrainer for an external teacher: grouped advantages, clipped loss, residual, and all-wrong KL.
 from trl.experimental.distillation import DistillationTrainer
 import torch
 import torch.nn.functional as F
@@ -130,7 +130,9 @@ class AOPDTrainer(DistillationTrainer):
         R = {}
         for i, j, p, c in rows:
             gt = self.answer_lookup.get(p)
-            R[(i, j)] = float(self.reward_func(None, [c], [gt])[0]) if gt is not None else 0.0
+            if gt is None:
+                raise RuntimeError('A rollout prompt has no ground truth. Check that data and trainer use the same chat template.')
+            R[(i, j)] = float(self.reward_func(None, [c], [gt])[0])
 
         groups = defaultdict(list)
         for i, j, p, _ in rows:
