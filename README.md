@@ -56,7 +56,7 @@ Both trainers compute group-relative advantages and apply the clipped AOPD loss.
 
 ## Training
 
-All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model, and optional training arguments follow it.
+All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model, and optional training arguments follow it. Each AOPD launcher lists its complete training recipe; append arguments to override it.
 
 | Script | Task / data | Steps | Training tokens |
 | :--- | :--- | ---: | ---: |
@@ -97,12 +97,14 @@ bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
 
 **Settings:** paper defaults use non-thinking mode, `batch-size = 32`, four responses per group, `temperature = 0.8, top-p = 1, top_k = -1` for AOPD. Learning rate is `2e-5`, except Qwen3 on biology uses `1e-5`. You can override this by `--learning_rate 1e-5 --output_dir outputs/my_run`.
 
+Self-distillation supports `--student_thinking True` and `--teacher_thinking True` independently. The original TRL model/training options, teacher modes, and checkpoint resumption are exposed through `--help`. W&B is the default logger; use `--report_to none` to disable it.
+
 ## Baselines
 
 Run OPD in the external-teacher environment and OPSD in the self-distillation environment; GRPO can be run in both.
 
 | Baseline | Source |
-| :--- | :--- | :--- |
+| :--- | :--- |
 | OPD-FKL / OPD-RKL | [`opd_train.py`](training/external_teacher/opd_train.py) |
 | OPSD | [`opsd_train.py`](training/self_distillation/opsd_train.py) |
 | GRPO | [`grpo_train.py`](training/grpo_train.py) |
@@ -111,11 +113,11 @@ Run OPD in the external-teacher environment and OPSD in the self-distillation en
 bash scripts/run_baseline.sh opd Qwen/Qwen3-1.7B --task math --divergence fkl
 bash scripts/run_baseline.sh opd Qwen/Qwen3-1.7B --task math --divergence rkl
 bash scripts/run_baseline.sh opsd Qwen/Qwen3-8B --task math
-bash scripts/run_baseline.sh grpo Qwen/Qwen3-1.7B --setting external --task math
-bash scripts/run_baseline.sh grpo Qwen/Qwen3-4B-Instruct-2507 --setting self --task biology
+bash scripts/run_baseline.sh grpo Qwen/Qwen3-1.7B --task math
+bash scripts/run_baseline.sh grpo Qwen/Qwen3-4B-Instruct-2507 --task biology
 ```
 
-OPD also supports `--task code`. GRPO supports all the tasks. OPD/OPSD use LR `5e-6` (OPSD biology: `2e-5`). Then, GRPO uses `1e-5` for math and medical, and `2e-5` for biology/coding.
+OPD also supports `--task code`. GRPO supports all the tasks; coding defaults to verified TACO, and `--data_dir data/code` selects the prepared DeepCoder data. OPD/OPSD use LR `5e-6` (OPSD biology: `2e-5`). GRPO defaults to LR `1e-5`, 400 steps, and four responses per group; override the standard training arguments as needed.
 
 ## Evaluation
 
