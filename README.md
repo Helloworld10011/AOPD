@@ -4,7 +4,11 @@
 
 ## Abstract
 
-On-policy distillation trains a student on its own responses using teacher probabilities. AOPD weights this supervision by its usefulness to the current student, combining teacher/student importance ratios with advantages estimated from the final rewards of grouped student responses. It supports both an external teacher and a reference-conditioned self-teacher, without additional counterfactual rollouts or a learned value model.
+Online Policy Distillation (OPD) often outperforms offline methods such as Supervised Fine-Tuning (SFT) by training on trajectories sampled directly from the student. However, standard OPD trains the student to follow the teacher at every state of the trajectory, assuming that teacher guidance is always beneficial. We instead distinguish between what the teacher prefers and what actually helps the current student succeed. We introduce Advantage-Based On-Policy Distillation (AOPD), which weights teacher actions by their counterfactual advantage under the student. Teacher actions that improve the student’s expected outcome are reinforced, while those that do not are downweighted.
+
+Directly computing these advantages requires trying alternative teacher actions at each step and running new rollouts from each. Instead, we show that the AOPD objective can be estimated using only standard student rollouts and their terminal rewards. Our estimator uses teacher importance weights on the student-sampled actions to provide unbiased advantage-weighted supervision, without any additional rollouts or reward evaluations. This allows AOPD to focus teacher supervision on actions that help the current student while preserving the rollout efficiency of standard OPD. Experiments on math, coding, and Medqa show gains over distillation and RL baselines in both external-teacher and self-distillation settings. 
+
+![Screenshot of the Application](images/aopd_fig-1.png)
 
 ## Getting Started
 
@@ -20,7 +24,7 @@ pip install -r training/self_distillation/requirements.txt
 pip install flash-attn==2.8.3 --no-build-isolation
 ```
 
-Run commands from the repository root. Launchers use eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). Set `WANDB_MODE=disabled` to disable training uploads.
+Launchers use eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`).
 
 ## Training
 
@@ -77,12 +81,10 @@ docker pull ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177
 
 ## Evaluation
 
-Evaluation code is in [`eval/`](eval/). Install `evalplus` for coding and merge a LoRA checkpoint when needed:
+Evaluation code is in [`eval/`](eval/). Install `evalplus` for coding:
 
 ```bash
 pip install evalplus
-python -m eval.merge --base_model Qwen/Qwen3-1.7B \
-  --adapter_path outputs/RUN/checkpoint-400 --save_path outputs/RUN/merged
 ```
 
 **Math** — AIME, AMC, HMMT, MATH-500, Minerva, OpenThoughts:
@@ -115,5 +117,3 @@ python -m eval.qa --model outputs/RUN/merged --task mmlupro \
 ```
 
 QA uses the original task parsers and saves raw answers. Medical defaults to 8192 tokens; biology/MMLU-Pro use 4096. Match prompts and decoding budgets across checkpoints.
-
-Built on TRL, [OPSD](https://arxiv.org/abs/2601.18734), VERL, and MMLU-Pro helpers. [Apache 2.0](LICENSE).
