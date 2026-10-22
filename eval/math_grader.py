@@ -1,4 +1,4 @@
-# Original boxed-answer extraction and symbolic equivalence grader used for math rewards and evaluation.
+# Shared boxed-answer extraction and mathematical equivalence checks for training and evaluation.
 # Copyright 2025 Garena Online Private Limited
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
