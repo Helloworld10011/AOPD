@@ -1,6 +1,6 @@
 # AOPD: When to Follow the Teacher
 
-*Advantage-Based On-Policy Distillation* provides a systemtic way to only use the useful parts of the teacher signal without any additional rollouts or inteventions.
+*Advantage-Based On-Policy Distillation* provides a systematic way to only use the useful parts of the teacher signal without any additional rollouts or interventions.
 
 ## Abstract
 
@@ -8,29 +8,53 @@ Online Policy Distillation (OPD) often outperforms offline methods such as Super
 
 Directly computing these advantages requires trying alternative teacher actions at each step and running new rollouts from each. Instead, we show that the AOPD objective can be estimated using only standard student rollouts and their terminal rewards. Our estimator uses teacher importance weights on the student-sampled actions to provide unbiased advantage-weighted supervision, without any additional rollouts or reward evaluations. This allows AOPD to focus teacher supervision on actions that help the current student while preserving the rollout efficiency of standard OPD. Experiments on math, coding, and Medqa show gains over distillation and RL baselines in both external-teacher and self-distillation settings. 
 
-![Screenshot of the Application](images/aopd_fig-1.png)
+![AOPD overview](images/aopd_fig-1.png)
 
 ## Getting Started
 
-Use Python 3.11 and separate environments for the two settings:
+Use Python 3.11 on Linux with CUDA GPUs supporting BF16. Clone the repository and run commands from its root:
 
 ```bash
-# External teacher
+git clone https://github.com/Helloworld10011/AOPD.git
+cd AOPD
+```
+
+**External teacher:**
+
+```bash
+python3.11 -m venv .venv-external
+source .venv-external/bin/activate
 pip install -r training/external_teacher/requirements.txt
 pip install flash-attn==2.7.3 --no-build-isolation
+```
 
-# Self-distillation — in a separate environment
+**Self-distillation:** use a separate environment because its TRL and vLLM versions differ.
+
+```bash
+python3.11 -m venv .venv-self
+source .venv-self/bin/activate
 pip install -r training/self_distillation/requirements.txt
 pip install flash-attn==2.8.3 --no-build-isolation
 ```
 
-Launchers use eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`).
+## Trainer
+
+There is one `AOPDTrainer` for each setting:
+
+| Setting | Loss implementation | Training entry point |
+| :--- | :--- | :--- |
+| External teacher | [`external_teacher/aopd_trainer.py`](training/external_teacher/aopd_trainer.py) | [`external_teacher/aopd_train.py`](training/external_teacher/aopd_train.py) |
+| Self-distillation | [`self_distillation/aopd_trainer.py`](training/self_distillation/aopd_trainer.py) | [`self_distillation/aopd_train.py`](training/self_distillation/aopd_train.py) |
+
+Both trainers compute group-relative advantages and apply the clipped AOPD loss. The self-distillation `AOPDTrainer` includes the buffered implementation: it generates one full group batch, computes group advantages across GPUs, then reuses those rollouts across the gradient-accumulation microbatches for that update. It inherits from `OPSDTrainer` in [`opsd_base.py`](training/self_distillation/opsd_base.py), which inherits from TRL’s `SFTTrainer`. Task prompts and rewards are in [`tasks.py`](training/self_distillation/tasks.py).
+
+**Mu (`--mu`):** adds forward KL toward the teacher only for groups where every response receives zero reward. It defaults to `0.08` for external math and `0` otherwise. Failed responses in a mixed group receive no extra KL; `--mu 0` disables it.
+
+**Residual:** the main loss caps teacher probability at `4 × student_probability`. The residual is the teacher probability mass left outside this cap. The original code handles it with a bounded sigmoid loss: it discourages that mass on positive-advantage responses and encourages it on negative-advantage responses. Both trainers retain this correction, weighted by the absolute advantage; it is separate from the all-wrong KL controlled by mu.
 
 ## Training
 
-Each setting has one `train.py` and one `trainer.py`, in [`training/external_teacher/`](training/external_teacher/) and [`training/self_distillation/`](training/self_distillation/). Self-distillation also keeps the upstream OPSD base in `opsd.py` and task data/rewards in `tasks.py`.
-
-All launchers are in [`scripts/`](scripts/). The first argument selects the student model; optional training arguments follow it.
+All launchers are in [`scripts/`](scripts/). They default to eight GPUs, BF16, and LoRA (`r=64`, `alpha=128`). The first argument selects the student model; optional training arguments follow it. Set `NUM_GPUS` for another GPU count; this changes the effective batch size.
 
 | Script | Task / data | Steps | Training tokens |
 | :--- | :--- | ---: | ---: |
@@ -40,22 +64,6 @@ All launchers are in [`scripts/`](scripts/). The first argument selects the stud
 | `run_self_medical.sh` | MedMCQA | 300 | 2048 |
 | `run_self_biology.sh` | SciKnowEval biology | 400 | 4096 |
 | `run_self_code.sh` | DeepCoder TACO | 400 | 4096 |
-
-**External teacher:** Qwen3-1.7B is the student; the math teacher is Qwen3-4B-Instruct-2507 and the coding teacher is Qwen3-8B.
-
-```bash
-bash scripts/run_external_math.sh Qwen/Qwen3-1.7B
-bash scripts/run_external_code.sh Qwen/Qwen3-1.7B
-```
-
-**Self-distillation:** the frozen base model sees a reference solution; the student sees only the problem. Math uses Qwen3-1.7B/8B; the other tasks use Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507.
-
-```bash
-bash scripts/run_self_math.sh Qwen/Qwen3-8B
-bash scripts/run_self_medical.sh Qwen/Qwen2.5-7B-Instruct
-bash scripts/run_self_biology.sh Qwen/Qwen3-4B-Instruct-2507
-bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
-```
 
 **Data:** math and medical training load the released datasets directly. Prepare biology and coding data once:
 
@@ -73,15 +81,27 @@ Self-coding executes Python in Docker. Pull its pinned runtime before training:
 docker pull ghcr.io/nuprl/multipl-e-evaluation@sha256:2cb4fcd74d89d149f7a3feb177f7d8169cef390a7ea7951c9b84e7ff59ea26cc
 ```
 
+**External teacher:** Qwen3-1.7B is the student; the math teacher is Qwen3-4B-Instruct-2507 and the coding teacher is Qwen3-8B.
+
+```bash
+bash scripts/run_external_math.sh Qwen/Qwen3-1.7B
+bash scripts/run_external_code.sh Qwen/Qwen3-1.7B
+```
+
+**Self-distillation:** the frozen base model sees a reference solution; the student sees only the problem. Math uses Qwen3-1.7B/8B; the other tasks use Qwen2.5-7B-Instruct or Qwen3-4B-Instruct-2507.
+
+```bash
+bash scripts/run_self_math.sh Qwen/Qwen3-8B
+bash scripts/run_self_medical.sh Qwen/Qwen2.5-7B-Instruct
+bash scripts/run_self_biology.sh Qwen/Qwen3-4B-Instruct-2507
+bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
+```
+
 **Settings:** paper defaults use non-thinking prompts, batch 32 on eight GPUs, four responses per group, temperature 0.8, top-p 1, and no sampling top-k pruning. Learning rate is `2e-5`, except Qwen3 biology uses `1e-5`. Override directly, e.g. append `--learning_rate 1e-5 --output_dir outputs/my_run`.
-
-**All-wrong KL:** `--mu` adds forward KL only when every response in a group fails. It defaults to 0.08 for external math and zero otherwise; wrong responses in mixed groups do not receive this extra KL.
-
-**Residual:** clipping at `4 × student_probability` leaves some teacher mass unused. The original bounded sigmoid correction discourages that leftover mass on positive-advantage responses and encourages it on negative-advantage responses. Both trainers retain this term separately from all-wrong KL.
 
 ## Evaluation
 
-Evaluation code is in [`eval/`](eval/). Install `evalplus` for coding:
+Evaluation code is in [`eval/`](eval/). Use a model checkpoint ready for inference as `--model` / `--model_path`. Install `evalplus` for coding:
 
 ```bash
 pip install evalplus
@@ -90,7 +110,7 @@ pip install evalplus
 **Math** — AIME, AMC, HMMT, MATH-500, Minerva, OpenThoughts:
 
 ```bash
-python -m eval.math --model_path outputs/RUN/merged --exp_name RUN \
+python -m eval.math --model_path path/to/model --exp_name RUN \
   --dataset aime --max_tokens 16192 --prompt_style self
 ```
 
@@ -99,8 +119,8 @@ Use `--prompt_style external` for external-teacher math. The evaluator retains t
 **Coding** — HumanEval+ and MultiPL-E:
 
 ```bash
-evalplus.evaluate --model outputs/RUN/merged --dataset humaneval --backend vllm --greedy
-python -m eval.multiple --model outputs/RUN/merged --lang java --out_dir results/multiple/java
+evalplus.evaluate --model path/to/model --dataset humaneval --backend vllm --greedy
+python -m eval.multiple --model path/to/model --lang java --out_dir results/multiple/java
 ```
 
 Score MultiPL-E outputs with its [official evaluator](https://github.com/nuprl/MultiPL-E). Pass@10 requires at least ten sampled completions; greedy evaluation provides pass@1.
@@ -108,11 +128,11 @@ Score MultiPL-E outputs with its [official evaluator](https://github.com/nuprl/M
 **Medical and biology:** prepare benchmark inputs with `python -m data.prepare --task medical` or `--task mmlupro`, then:
 
 ```bash
-python -m eval.qa --model outputs/RUN/merged --task medical \
+python -m eval.qa --model path/to/model --task medical \
   --data data/medical/medqa_test.jsonl --output results/medqa.jsonl
-python -m eval.qa --model outputs/RUN/merged --task biology \
+python -m eval.qa --model path/to/model --task biology \
   --data data/biology/source50.jsonl --output results/biology.jsonl
-python -m eval.qa --model outputs/RUN/merged --task mmlupro \
+python -m eval.qa --model path/to/model --task mmlupro \
   --data data/mmlupro717.jsonl --output results/mmlupro.jsonl
 ```
 
