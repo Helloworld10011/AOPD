@@ -99,13 +99,13 @@ bash scripts/run_self_code.sh Qwen/Qwen3-4B-Instruct-2507
 
 ## Baselines
 
-The baselines have separate entry points and use the same task data, student prompts, LoRA rank, and step budgets as above. Run OPD in the external-teacher environment and OPSD in the self-distillation environment; GRPO uses the environment selected by `--setting`. The distillation baselines use plain KL without AOPD advantage weighting or residual terms.
+Run OPD in the external-teacher environment and OPSD in the self-distillation environment; GRPO can be run in both.
 
-| Baseline | Source | Objective |
+| Baseline | Source |
 | :--- | :--- | :--- |
-| OPD-FKL / OPD-RKL | [`opd_train.py`](training/external_teacher/opd_train.py) | Plain forward or reverse KL to the external teacher |
-| OPSD | [`opsd_train.py`](training/self_distillation/opsd_train.py) | Forward KL to the frozen base model with a reference solution |
-| GRPO | [`grpo_train.py`](training/grpo_train.py) | Group-relative reward optimization; no teacher |
+| OPD-FKL / OPD-RKL | [`opd_train.py`](training/external_teacher/opd_train.py) |
+| OPSD | [`opsd_train.py`](training/self_distillation/opsd_train.py) |
+| GRPO | [`grpo_train.py`](training/grpo_train.py) |
 
 ```bash
 bash scripts/run_baseline.sh opd Qwen/Qwen3-1.7B --task math --divergence fkl
@@ -115,9 +115,7 @@ bash scripts/run_baseline.sh grpo Qwen/Qwen3-1.7B --setting external --task math
 bash scripts/run_baseline.sh grpo Qwen/Qwen3-4B-Instruct-2507 --setting self --task biology
 ```
 
-OPD also supports `--task code`; OPSD and self-setting GRPO support all four self-distillation tasks. Distillation defaults to `--top_k_loss 0`. OPD/OPSD use LR `5e-6` (OPSD biology: `2e-5`); GRPO uses `5e-6` for math, `1e-5` for medical, and `2e-5` for biology/coding. Override with `--learning_rate` as needed.
-
-GRPO keeps `loss_type="grpo"`, no KL penalty, no reward standardization, and masked truncated completions. It samples eight responses per group in the external setting and four in the self setting; default accumulation is eight and four respectively. Baseline outputs have separate directories under `outputs/`.
+OPD also supports `--task code`. GRPO supports all the tasks. OPD/OPSD use LR `5e-6` (OPSD biology: `2e-5`). Then, GRPO uses `1e-5` for math and medical, and `2e-5` for biology/coding.
 
 ## Evaluation
 
