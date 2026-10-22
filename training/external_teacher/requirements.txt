@@ -1,4 +1,4 @@
-# External-teacher environment recorded on the source machine (Python 3.11).
+# External-teacher AOPD: pinned runtime for Python 3.11; install FlashAttention separately.
 torch==2.9.0
 transformers==4.57.6
 trl==1.1.0
